@@ -1,16 +1,8 @@
 -- STATIC IMPORTS
 local require = GLOBAL.require
 local resolvefilepath = GLOBAL.resolvefilepath
-local LoadFonts = GLOBAL.LoadFonts
-local Vector3 = GLOBAL.Vector3
-local TheInput = GLOBAL.TheInput
-local DEFAULT_FALLBACK_TABLE = GLOBAL.DEFAULT_FALLBACK_TABLE
-local DEFAULT_FALLBACK_TABLE_OUTLINE = GLOBAL.DEFAULT_FALLBACK_TABLE_OUTLINE
-local FONTS = GLOBAL.FONTS
 local debug = require("itemmeta.util.debug")
 local config = require("itemmeta.util.config")
-
-debug.log("Loading modmain.lua...")
 
 -- INIT
 -- Load config
@@ -23,96 +15,137 @@ debug.safecall(function()
     end
 end)
 
--- Disable with incompatible mods
-local INCOMPATIBLE_MODS = {
-    "workshop-347079953", -- Display Food Values
-    "workshop-2189004162", -- Insight,
-    "workshop-666155465", -- Show Me,
-}
-if config.FORCE_ENABLE ~= "true" then
-    for _, modId in ipairs(INCOMPATIBLE_MODS) do
-        if GLOBAL.KnownModIndex:IsModEnabled(modId) then
-            debug.log("Disabled due to incompatible mod:", modId)
-            return
-        end
+-- LOAD FONT ASSET
+local ICONS_FONT_ALIAS = "itemmeta_icons"
+local ICONS_FONT_FILE  = "fonts/icons.zip"
+local ICONS_FONT_PATH  = resolvefilepath(ICONS_FONT_FILE)
+
+Assets = Assets or {}
+table.insert(Assets, Asset("FONT", ICONS_FONT_FILE))
+
+local function insert_once(t, v, pred)
+    if type(t) ~= "table" then return end
+    for _, x in ipairs(t) do
+        if pred(x) then return end
     end
+    table.insert(t, v)
 end
 
--- SCRIPTS
-local mod_interface = require("itemmeta.mod_interface")
-local ItemTile = require("widgets/itemtile")
-local Inv = require("widgets/inventorybar")
+insert_once(GLOBAL.FONTS, {
+    filename = ICONS_FONT_PATH,
+    alias = ICONS_FONT_ALIAS,
+    disable_color = true,
+}, function(x) return type(x) == "table" and x.alias == ICONS_FONT_ALIAS end)
 
--- ASSETS
-local ICONS_FONT_ALIAS = "itemmeta_icons"
-local ICONS_FONT_PATH = resolvefilepath("fonts/icons.zip")
+insert_once(GLOBAL.DEFAULT_FALLBACK_TABLE, ICONS_FONT_ALIAS,
+    function(x) return x == ICONS_FONT_ALIAS end)
 
--- Declare the font asset in the mod asset table
-Assets = {
-    Asset("FONT", ICONS_FONT_PATH),
-}
-
--- Load the icons font
-AddSimPostInit(function()
-    -- Add icons to the list of fonts to load
-    table.insert(FONTS, { filename = ICONS_FONT_PATH, alias = ICONS_FONT_ALIAS, disable_color = true })
-
-    -- Add icons (as fallback) to other fonts
-    table.insert(DEFAULT_FALLBACK_TABLE, 1, ICONS_FONT_ALIAS)
-    table.insert(DEFAULT_FALLBACK_TABLE_OUTLINE, 1, ICONS_FONT_ALIAS)
-
-    -- Reload all fonts
-    debug.log("Reloading fonts...")
-    LoadFonts()
-    debug.log("Fonts reloaded.")
-end)
+insert_once(GLOBAL.DEFAULT_FALLBACK_TABLE_OUTLINE, ICONS_FONT_ALIAS,
+    function(x) return x == ICONS_FONT_ALIAS end)
 
 -- MODIFICATIONS
+local mod_interface = require("itemmeta.mod_interface")
 -- Add metadata to inventory item tooltips
-local _ItemTile_GetDescriptionString = ItemTile.GetDescriptionString
-function ItemTile:GetDescriptionString()
-    local metaDescription = debug.safecall(mod_interface.GetItemMetaDescription, self.item) or ""
-    return _ItemTile_GetDescriptionString(self) .. metaDescription
-end
-
--- Add metadata to inventory item tooltips (controller mode)
-local _Inv_GetDescriptionString = Inv.GetDescriptionString
-function Inv:GetDescriptionString(item)
-    local metaDescription = debug.safecall(mod_interface.GetItemMetaDescription, item) or ""
-    return _Inv_GetDescriptionString(self, item) .. metaDescription
-end
-
--- Keep the tooltip above the cursor
-local _ItemTile_GetTooltipPos = ItemTile.GetTooltipPos
-function ItemTile:GetTooltipPos()
-    -- Allow other mods to position the tooltip
-    local basePos = _ItemTile_GetTooltipPos and _ItemTile_GetTooltipPos(self)
-    if (basePos) then return basePos end
-
-    return debug.safecall(function()
-        -- Count the number of lines in the tooltip
-        local lines = 1
-        if self.tooltip and self.tooltip ~= "" then
-            for _ in string.gmatch(self.tooltip, "\n") do lines = lines + 1 end
-        end
-
-        -- Place the tooltip above the cursor
-        return Vector3(0, 10 + 15 * lines, 0)
-    end)
-end
-
--- Prevent the hoverer from messing with the tooltip position near the bottom of the screen
-AddClassPostConstruct("widgets/hoverer", function(self)
-    local _SetPosition = self.SetPosition
-    function self:SetPosition(pos, y, ...)
-        debug.safecall(function()
-            if type(y) == "number" then
-                local cursorY = TheInput:GetScreenPosition().y
-                y = math.min(y, cursorY)
-            end
-        end)
-        return _SetPosition(self, pos, y, ...)
+AddClassPostConstruct("widgets/itemtile", function(self)
+    local _ItemTile_GetDescriptionString = self.GetDescriptionString
+    function self:GetDescriptionString()
+        local metaDescription = debug.safecall(mod_interface.GetItemMetaDescription, self.item) or ""
+        return _ItemTile_GetDescriptionString(self) .. metaDescription
     end
 end)
 
-debug.log("Done!")
+-- Add metadata to inventory item tooltips (controller mode)
+AddClassPostConstruct("widgets/inventorybar", function(self)
+    local _Inv_GetDescriptionString = self.GetDescriptionString
+    function self:GetDescriptionString(item)
+        local metaDescription = debug.safecall(mod_interface.GetItemMetaDescription, item) or ""
+        return _Inv_GetDescriptionString(self, item) .. metaDescription
+    end
+end)
+
+-- Fix hoverer position to avoid going off-screen
+AddClassPostConstruct("widgets/hoverer", function(self)
+    local _UpdatePosition = self.UpdatePosition
+
+    function self:UpdatePosition(x, y)
+        if not (self and self.shown) then
+            return _UpdatePosition(self, x, y)
+        end
+
+        -- Apply only to multiline HUD/control tooltips (item tooltip), never to action hover tooltips
+        local controls = self.owner and self.owner.HUD and self.owner.HUD.controls
+        local is_itemtip =
+            controls and controls.GetTooltip and controls:GetTooltip() ~= nil and
+            (self.secondarystr == nil or self.secondarystr == "") and
+            type(self.str) == "string" and self.str:find("\n", 1, true) ~= nil
+
+        if not is_itemtip then
+            return _UpdatePosition(self, x, y)
+        end
+
+        -- Need a valid measured region; if not ready yet, fall back to vanilla this tick
+        local text = self.text
+        if text == nil or text.GetRegionSize == nil then
+            return _UpdatePosition(self, x, y)
+        end
+
+        local w, h = text:GetRegionSize()
+        if not (w and h and w > 0 and h > 0) then
+            return _UpdatePosition(self, x, y)
+        end
+
+        local scale = self:GetScale()
+        w, h = w * scale.x, h * scale.y
+
+        local p = text:GetPosition()
+        local cx, cy = (p.x or 0) * scale.x, (p.y or 0) * scale.y
+
+        local left, right  = cx - w/2, cx + w/2
+        local bottom, top  = cy - h/2, cy + h/2
+
+        local sw, sh = GLOBAL.TheSim:GetScreenSize()
+        local m = 10
+
+        -- Cursor is the lower limit for item tooltips
+        y = math.max(y, y + m - bottom)
+
+        -- Clamp to screen
+        x = math.max(x, m - left)
+        x = math.min(x, sw - m - right)
+
+        y = math.max(y, m - bottom)
+        y = math.min(y, sh - m - top)
+
+        self:SetPosition(x, y, 0)
+    end
+end)
+
+-- DS compatibility: emulate DST-style inst:CollectActions by calling DS-style component collector methods.
+if GLOBAL.EntityScript ~= nil and GLOBAL.EntityScript.CollectActions == nil then
+    function GLOBAL.EntityScript:CollectActions(actiontype, ...)
+        if self == nil or self.components == nil or actiontype == nil then
+            return
+        end
+
+        -- Map DST actiontype strings to the collector method names typically present on DS components.
+        local method =
+            (actiontype == "SCENE"     and "CollectSceneActions") or
+            (actiontype == "INVENTORY" and "CollectInventoryActions") or
+            (actiontype == "EQUIPPED"  and "CollectEquippedActions") or
+            (actiontype == "POINT"     and "CollectPointActions") or
+            (actiontype == "USEITEM"   and "CollectUseActions") or
+            nil
+
+        if method == nil then
+            return
+        end
+
+        -- Call every component that implements that collector. Extra args are harmless in Lua.
+        for _, cmp in pairs(self.components) do
+            local fn = cmp[method]
+            if fn ~= nil then
+                fn(cmp, ...)
+            end
+        end
+    end
+end

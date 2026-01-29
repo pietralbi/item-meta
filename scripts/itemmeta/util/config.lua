@@ -2,5 +2,4 @@
 return {
     FOOD_FORMAT = "h",
     FOOD_ORDER = "hu/he/sa",
-    FORCE_ENABLE = "",
 }

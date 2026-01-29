@@ -12,8 +12,8 @@ local function RoundToOneDecimal(value) return math.floor(value * 10 + 0.5) / 10
 
 --- Returns a metadata entry for the description string, or an empty string if the value is nil.
 ---@param icon string
----@param value number
----@param format string|function
+---@param value number|string
+---@param format? string|function
 ---@return string
 local function CreateEntry(icon, value, format)
     if not value then return "" end
@@ -28,7 +28,7 @@ end
 --- Returns a metadata entry with a newline for the description string, or an empty string if the value is nil.
 ---@param icon string
 ---@param value number
----@param format string|function
+---@param format? string|function
 ---@return string The entry with a newline, or an empty string if the value is nil
 local function CreateRow(icon, value, format)
     local entry = CreateEntry(icon, value, format)

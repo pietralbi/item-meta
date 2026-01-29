@@ -12,13 +12,9 @@ local cookedPrefabs = {}
 ---@param prefab string
 ---@return table, table The item, and its cooked version if applicable
 local function SpawnAndRemoveItem(prefab)
-    local isMasterSim = TheWorld.ismastersim
-    local allPlayers = AllPlayers
-    TheWorld.ismastersim = true
-    AllPlayers = {}
-
     local itemCopy = debug.safecall(SpawnPrefab, prefab)
     local itemCopyCooked
+    local ThePlayer = GetPlayer()
 
     if itemCopy then
         if itemCopy.components and itemCopy.components.cookable then
@@ -33,9 +29,6 @@ local function SpawnAndRemoveItem(prefab)
 
         debug.safecall(function() itemCopy:Remove() end)
     end
-
-    TheWorld.ismastersim = isMasterSim
-    AllPlayers = allPlayers
 
     return itemCopy, itemCopyCooked
 end

@@ -19,6 +19,7 @@ end
 local function CanConsume(item)
     local result = debug.safecall(function()
         assert(ACTIONS.EAT, "ACTIONS.EAT is not defined")
+        local ThePlayer = GetPlayer()
 
         local actions = {}
         item:CollectActions("INVENTORY", ThePlayer, actions)
